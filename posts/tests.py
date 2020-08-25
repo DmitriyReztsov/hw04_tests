@@ -3,77 +3,100 @@ from django.test import Client
 from django.urls import reverse
 
 
-from .models import User, Post
+from .models import User, Post, Group
 
 
 class Profile(TestCase):
     def setUp(self):
-        self.client = Client()
+        self.client_auth = Client()
         self.user = User.objects.create_user(username="test_user", 
                     email="test_user@krymskiy.com", 
                     password="1234!Q")
-            
+        self.group = Group.objects.create(
+                    title="test_group", 
+                    slug="testgroup", 
+                    description="test description"
+                    )
+        self.client_auth.force_login(self.user)
+        self.client_non = Client()
+
+    # метод для проверки постов
+    def check_text(self, post1, post2):
+        # check text
+        self.assertEqual(post1.text, post2.text)
+        # chek author
+        self.assertEqual(post1.author, post2.author)
+        # check group
+        self.assertEqual(post1.group, post2.group)
+
+    def check_urls(self, post1):
+        urls = (
+		    reverse("index"),
+		    reverse("profile", kwargs={"username": self.user.username}),
+		    reverse("post", kwargs={"username": self.user.username, "post_id": self.post.id,})
+	    )
+        for url in urls:
+            response = self.client_non.get(url)
+            if url == reverse("post", kwargs={"username": self.user.username, "post_id": self.post.id,}):
+                post_new = response.context['post']
+            else:
+                paginator = response.context.get('paginator')
+                post_new = response.context['page'][0]
+                self.assertEqual(paginator.count, 1)
+            self.check_text(self.post, post_new)
+
     def test_profile(self):
-        response = self.client.get("/test_user/") # запрос к странице автора
-        self.assertEqual(response.status_code, 200) # проверяем, что страница существует
+        # запрос к странице автора
+        response = self.client_non.get(reverse('profile', 
+                    kwargs={"username": self.user.username,})) 
+        # проверяем, что страница существует
+        self.assertEqual(response.status_code, 200) 
         
-    def new_post_auth(self):
-        self.client.login(username='test_user', password='1234!Q')
-        response = self.client.get("/new/")
-        # проверяем, что там есть пост
+    def test_new_post_auth(self):
+        # снимаем количество постов до создания нового поста
+        posts_before = Post.objects.count()
+        # create new post
+        self.post = Post.objects.create(
+                    text="Test text", 
+                    author=self.user, 
+                    group=self.group
+                    )
+        # get quantity of posts after post creation
+        posts_after = Post.objects.count()
+        post_new = Post.objects.get(id=1)
+        response = self.client_auth.get(reverse('new_post'))
+        # проверяем, что есть доступ к странице создания поста
         self.assertEqual(response.status_code, 200)
+        # check new post added to DB
+        self.assertNotEqual(posts_before, posts_after)
+        self.check_text(self.post, post_new)
 
-    def new_post_anonimus(self):
-        response = self.client.get("/new/")
-        self.assertNotEqual(response.status_code, 200)
+    def test_new_post_anonimus(self):
+        # снимаем количество постов до попытки создания нового поста
+        posts_before = Post.objects.count()
+        response = self.client_non.get(reverse('new_post'))
+        # get quantity of posts after post creation attemp
+        posts_after = Post.objects.count()
+        self.assertRedirects(response, '/auth/login/?next=/new/')
+        self.assertEqual(posts_before, posts_after)
 
-    def after_pub(self):
+    def test_after_pub(self):
         # создание поста зарегистрированным пользователем
         self.post = Post.objects.create(text="You're talking about things"
                     " I haven't done yet in the past tense. It's driving "
                     "me crazy!", author=self.user)
-        # После публикации поста новая запись появляется на главной странице сайта (index)
-        response = self.client.get(reverse('index'))
-        paginator = response.context.get('paginator')
-        post = response.context['page'][0]
-        self.assertEqual(paginator.count, 1)
-        self.assertEqual(post.text, self.post.text)
+        # Проверка после публикации на связанных страницах
+        self.check_urls(self.post)
 
-        # на персональной странице пользователя (profile),
-        response = self.client.get(reverse('profile', args=(self.user.username,)))
-        paginator = response.context.get('paginator')
-        post = response.context['page'][0]
-        self.assertEqual(paginator.count, 1)
-        self.assertEqual(post.text, self.post.text)
-
-        # и на отдельной странице поста (post)
-        response = self.client.get(reverse('post', args=(self.user.username, self.post.id,)))
-        #paginator = response.context.get('paginator')
-        post = response.context['post']
-        #self.assertEqual(paginator.count, 1)
-        self.assertEqual(post.text, self.post.text)
-
-    def edit_auth(self):
-        self.client.login(username='test_user', password='1234!Q')
+    def test_edit_auth(self):
         self.post = Post.objects.create(text="Test text 1", author=self.user)
         
         # Авторизованный пользователь может отредактировать свой пост 
-        response = self.client.get('/test_user/1/edit/')
+        response = self.client_auth.get(reverse('post_edit', 
+                    kwargs={"username": self.user.username, "post_id": self.post.id,}))
         self.assertEqual(response.status_code, 200)
         self.post.text = "Test text 2"
         self.post.save()
         
-        # и его содержимое изменится на всех связанных страницах: странице поста
-        response = self.client.get('/test_user/1/')
-        post = response.context['post']
-        self.assertEqual(post.text, self.post.text)
-
-        # на начальной странице (index)
-        response = self.client.get(reverse('index'))
-        post = response.context['page'][0]
-        self.assertEqual(post.text, self.post.text)
-
-        # на персональной странице пользователя (profile),
-        response = self.client.get(reverse('profile', args=(self.user.username,)))
-        post = response.context['page'][0]
-        self.assertEqual(post.text, self.post.text)        
+        # Проверка после публикации на связанных страницах
+        self.check_urls(self.post)

@@ -3,6 +3,7 @@ from django.shortcuts import redirect
 #  функция reverse_lazy позволяет получить URL по параметру "name" функции path()
 from django.urls import reverse_lazy
 from django.core.paginator import Paginator
+from django.contrib.auth.decorators import login_required
 
 from .models import Post, Group, User
 from .forms import PostForm
@@ -31,11 +32,10 @@ def group_posts(request, slug):
     page = paginator.get_page(page_number)  # получить записи с нужным смещением    
     return render(request, "group.html", {"group": group, 'page': page, 'paginator': paginator})
 
+
 """ view-функция для обработки нового поста"""
+@login_required
 def new_post(request):
-    if request.user.is_authenticated == False:
-        return redirect ('index')
-    
     """ Проверка метода, валидация и сохранения формы.
 
     Если метод не POST (GET), если форма не прошла валидацию - 
@@ -58,9 +58,11 @@ def new_post(request):
     new_entry.save()
     return redirect('index')
 
+
 def profile(request, username):
     profile_user = User.objects.get(username=username)
-    profile_posts = Post.objects.filter(author=profile_user)
+    # получаем посты из модели User по related_name 'posts'
+    profile_posts = profile_user.posts.all()
     paginator = Paginator(profile_posts, 10)
     page_number = request.GET.get('page')
     page = paginator.get_page(page_number)
@@ -72,12 +74,14 @@ def profile(request, username):
  
  
 def post_view(request, username, post_id):
-    post = Post.objects.get(pk=post_id)
+    post = get_object_or_404(Post, pk=post_id, author__username=username)
     author = User.objects.get(username=username)
-    quantity_posts = Post.objects.filter(author=author).count
+    # get number of posts from User model via related name 'posts' 
+    quantity_posts = author.posts.all().count
     return render(request, 'post.html', {'author': author, 'post': post, 'quantity_posts': quantity_posts})
 
 
+@login_required
 def post_edit(request, username, post_id):
     author = User.objects.get(username=username)
     article = Post.objects.get(id=post_id) # запрашиваем объект
