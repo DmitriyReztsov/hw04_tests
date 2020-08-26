@@ -84,7 +84,8 @@ def post_view(request, username, post_id):
 @login_required
 def post_edit(request, username, post_id):
     author = User.objects.get(username=username)
-    article = Post.objects.get(id=post_id) # запрашиваем объект
+    article = get_object_or_404(Post, pk=post_id, 
+                author__username=username) # запрашиваем объект
 
     # проверка что текущий пользователь — это автор записи
     if request.user != author:
@@ -97,16 +98,11 @@ def post_edit(request, username, post_id):
         return render(request, 'new_post.html', {'form': form, 'if_edit': if_edit, 
                         'article': article}) # article нужна для прохождения тестов
         
-    form = PostForm(request.POST)
+    form = PostForm(request.POST, instance=article) # передаем сам пост вместе с запросом
         
     if form.is_valid() == False:
         return render(request, 'new_post.html', {'form': form})
 
-    # сохраняем форму, оставляя ее доступной для редактирования
-    # определяем оставшиеся поля author, id, pub_date, сохраняем
-    edited_entry = form.save(commit=False)
-    edited_entry.author = author
-    edited_entry.id = article.id
-    edited_entry.pub_date = article.pub_date
-    edited_entry.save()
+    # сохраняем форму. Остальные поля (author, id, pub_date) остаются неизменными
+    form.save()
     return redirect('post', username=author, post_id=article.id)

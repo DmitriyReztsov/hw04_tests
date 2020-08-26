@@ -32,18 +32,18 @@ class Profile(TestCase):
     def check_urls(self, post1):
         urls = (
 		    reverse("index"),
-		    reverse("profile", kwargs={"username": self.user.username}),
-		    reverse("post", kwargs={"username": self.user.username, "post_id": self.post.id,})
+		    reverse("profile", kwargs={"username": post1.author.username}),
+		    reverse("post", kwargs={"username": post1.author.username, "post_id": post1.id,})
 	    )
         for url in urls:
             response = self.client_non.get(url)
-            if url == reverse("post", kwargs={"username": self.user.username, "post_id": self.post.id,}):
+            if url == reverse("post", kwargs={"username": post1.author.username, "post_id": post1.id,}):
                 post_new = response.context['post']
             else:
                 paginator = response.context.get('paginator')
                 post_new = response.context['page'][0]
                 self.assertEqual(paginator.count, 1)
-            self.check_text(self.post, post_new)
+            self.check_text(post1, post_new)
 
     def test_profile(self):
         # запрос к странице автора
@@ -55,21 +55,25 @@ class Profile(TestCase):
     def test_new_post_auth(self):
         # снимаем количество постов до создания нового поста
         posts_before = Post.objects.count()
-        # create new post
-        self.post = Post.objects.create(
-                    text="Test text", 
-                    author=self.user, 
-                    group=self.group
+        # check access to new_post page
+        response_access = self.client_auth.get(reverse('new_post'))
+        # create new post        
+        response = self.client_auth.post(reverse('new_post'), {
+                    'group': self.group.id,
+                    'text': "Test text",
+                    'author': self.user.id
+                    }
                     )
         # get quantity of posts after post creation
         posts_after = Post.objects.count()
         post_new = Post.objects.get(id=1)
-        response = self.client_auth.get(reverse('new_post'))
+        
         # проверяем, что есть доступ к странице создания поста
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response_access.status_code, 200)
+        self.assertEqual(response.status_code, 302)
         # check new post added to DB
         self.assertNotEqual(posts_before, posts_after)
-        self.check_text(self.post, post_new)
+        self.check_urls(post_new)
 
     def test_new_post_anonimus(self):
         # снимаем количество постов до попытки создания нового поста
@@ -77,7 +81,7 @@ class Profile(TestCase):
         response = self.client_non.get(reverse('new_post'))
         # get quantity of posts after post creation attemp
         posts_after = Post.objects.count()
-        self.assertRedirects(response, '/auth/login/?next=/new/')
+        self.assertRedirects(response, reverse('login')+'?next='+reverse('new_post'))
         self.assertEqual(posts_before, posts_after)
 
     def test_after_pub(self):
